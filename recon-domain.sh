@@ -78,6 +78,10 @@ cat params.txt | gf sqli > sqli.txt
 echo "[+] cat params.txt | gf lfi > lfi.txt"
 cat params.txt | gf lfi > lfi.txt
 
+echo "[+] cat params.txt | gf rce > rce.txt"
+cat params.txt | gf rce > rce.txt
+
+
 echo "[*] Recon terminée pour $DOMAIN !"
 echo "Résultats dans ./recon/$DOMAIN/"
 
