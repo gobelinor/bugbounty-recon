@@ -1,6 +1,7 @@
 #!/bin/bash
 # Reconnaissance automatique Bug Bounty
 # Usage: ./recon.sh example.com
+set -euo pipefail
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <domain>"
