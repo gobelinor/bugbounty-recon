@@ -18,13 +18,15 @@ echo "[*] Lancement de la reconnaissance sur $DOMAIN..."
 ### 1. Subdomains
 echo "[*] Collecte des sous-domaines..."
 
+echo $DOMAIN > subdomains.txt
+
 echo "[+] subfinder -d $DOMAIN -silent"
-subfinder -d $DOMAIN -silent | tee subdomains.txt
+subfinder -d $DOMAIN -silent | tee -a subdomains.txt
 
 echo "[+] assetfinder --subs-only $DOMAIN"	
 assetfinder --subs-only $DOMAIN | tee -a subdomains.txt
 
-echo "[+] amass enum -passive -d $DOMAIN"
+# echo "[+] amass enum -passive -d $DOMAIN"
 # amass enum -passive -d $DOMAIN | tee -a subdomains.txt
 
 cat subdomains.txt | sort -u > subs.txt
