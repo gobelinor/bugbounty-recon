@@ -10,8 +10,8 @@ fi
 
 DOMAIN=$1
 
-mkdir -p recon/$DOMAIN
-cd recon/$DOMAIN
+mkdir -p $DOMAIN
+cd $DOMAIN
 
 echo "[*] Lancement de la reconnaissance sur $DOMAIN..."
 
@@ -25,24 +25,24 @@ echo "[+] assetfinder --subs-only $DOMAIN"
 assetfinder --subs-only $DOMAIN | tee -a subdomains.txt
 
 echo "[+] amass enum -passive -d $DOMAIN"
-amass enum -passive -d $DOMAIN | tee -a subdomains.txt
+# amass enum -passive -d $DOMAIN | tee -a subdomains.txt
 
 cat subdomains.txt | sort -u > subs.txt
 
 ### 2. Probe
 echo "[*] Vérification des sous-domaines vivants..."
 
-echo "[+] httpx -l subs.txt -silent -status-code -title -tech-detect -json > httpx.json"
-cat subs.txt | httpx -silent -status-code -title -tech-detect -json > httpx.json
-
 echo "[+] httpx -l subs.txt -silent > alive.txt"
 cat subs.txt | httpx -silent > alive.txt
+
+echo "[+] httpx -l subs.txt -silent -status-code -title -tech-detect -json > httpx.json"
+cat alive.txt | httpx -silent -status-code -title -tech-detect -json > httpx.json
 
 ### 3. Screenshots
 echo "[*] Screenshots des cibles vivantes..."
 
-echo "[+] gowitness file -f alive.txt -P screenshots/ --no-http"
-gowitness file -f alive.txt -P screenshots/ --no-http
+echo "[+] gowitness scan file -f alive.txt -s screenshots/ --no-http"
+gowitness scan file -f alive.txt -s screenshots/ --no-http
 
 ### 4. Crawl + URLs
 echo "[*] Récupération des endpoints publics..."
@@ -72,8 +72,14 @@ cat all_urls.txt | grep "=" | tee params.txt
 echo "[+] cat params.txt | gf xss > xss.txt"
 cat params.txt | gf xss > xss.txt
 
-echo "[+] cat params.txt | gf ssti > ssti.txt"
+echo "[+] cat params.txt | gf sqli > sqli.txt"
 cat params.txt | gf sqli > sqli.txt
+
+echo "[+] cat params.txt | gf ssrf > ssrf.txt"
+cat params.txt | gf ssrf > ssrf.txt
+
+echo "[+] cat params.txt | gf ssti > ssti.txt"
+cat params.txt | gf ssti > ssti.txt
 
 echo "[+] cat params.txt | gf lfi > lfi.txt"
 cat params.txt | gf lfi > lfi.txt
@@ -83,6 +89,5 @@ cat params.txt | gf rce > rce.txt
 
 
 echo "[*] Recon terminée pour $DOMAIN !"
-echo "Résultats dans ./recon/$DOMAIN/"
 
 
