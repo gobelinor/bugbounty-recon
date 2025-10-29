@@ -1,78 +1,39 @@
 FROM golang:latest
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system deps (one RUN)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
-    chromium \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Go environment
-ENV PATH="/root/go/bin:${PATH}"
-ENV GOPATH="/root/go"
+# Put go-installed tools in /usr/local/bin
+ENV GOBIN=/usr/local/bin
+ENV PATH="${GOBIN}:${PATH}"
 ENV GO111MODULE=on
 
-# Install tools one by one and verify
-RUN echo "Installing subfinder..." && \
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
-    subfinder -version
+# Install tools
+RUN set -eux; \
+    echo "Installing subfinder..." && \
+    go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
+    echo "Installing assetfinder..." && \
+    go install github.com/tomnomnom/assetfinder@latest && \
+    echo "Installing httpx..." && \
+    go install github.com/projectdiscovery/httpx/cmd/httpx@latest && \
+    echo "Installing dnsx..." && \
+    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
 
-RUN echo "Installing assetfinder..." && \
-    go install -v github.com/tomnomnom/assetfinder@latest && \
-    which assetfinder
+# Add crtsh helper
+COPY crtsh.sh /usr/local/bin/crtsh
+RUN chmod +x /usr/local/bin/crtsh
 
-RUN echo "Installing httpx..." && \
-    go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest && \
-    httpx -version
-
-RUN echo "Installing gowitness..." && \
-    go install -v github.com/sensepost/gowitness@latest && \
-    which gowitness
-
-RUN echo "Installing gau..." && \
-    go install -v github.com/lc/gau/v2/cmd/gau@latest && \
-    which gau
-
-RUN echo "Installing waybackurls..." && \
-    go install -v github.com/tomnomnom/waybackurls@latest && \
-    which waybackurls
-
-RUN echo "Installing katana..." && \
-    go install -v github.com/projectdiscovery/katana/cmd/katana@latest && \
-    katana -version
-
-RUN echo "Installing nuclei..." && \
-    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest && \
-    nuclei -version
-
-RUN echo "Installing gf..." && \
-    go install -v github.com/tomnomnom/gf@latest && \
-    which gf
-
-RUN echo "Installing amass..." && \
-    go install -v github.com/owasp-amass/amass/v4/...@master && \
-    amass -version
-
-# Install gf patterns
-RUN mkdir -p /root/.gf && \
-    git clone https://github.com/1ndianl33t/Gf-Patterns /tmp/gf-patterns && \
-    cp /tmp/gf-patterns/*.json /root/.gf/ 2>/dev/null || true && \
-    rm -rf /tmp/gf-patterns
-
-# Download nuclei templates
-RUN nuclei -update-templates
-
-# Verify all installations
-RUN echo "=== Installed Tools ===" && \
-    ls -la /root/go/bin/ && \
-    echo "PATH: $PATH"
-
-# Set working directory
+# Copy recon script
 WORKDIR /recon
-
-# Copy the recon script
 COPY recon-domain.sh /usr/local/bin/recon.sh
 RUN chmod +x /usr/local/bin/recon.sh
 
-# Set the script as entrypoint
+# Simple verification (optional)
+RUN echo "Installed:" && ls -la /usr/local/bin | sed -n '1,200p'
+
 ENTRYPOINT ["/usr/local/bin/recon.sh"]
+

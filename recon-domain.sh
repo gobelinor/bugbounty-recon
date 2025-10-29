@@ -1,95 +1,87 @@
-#!/bin/bash
-# Reconnaissance automatique Bug Bounty
+#!/usr/bin/env bash
+# recon.sh - découverte de sous-domaines (version améliorée)
 # Usage: ./recon.sh example.com
 set -euo pipefail
+IFS=$'\n\t'
 
-if [ -z "$1" ]; then
+# Rappelle: appelé par gogoliomax
+if [ "${1:-}" = "" ]; then
   echo "Usage: $0 <domain>"
   exit 1
 fi
 
-DOMAIN=$1
+DOMAIN="$1"
+OUTDIR="$(pwd)/$DOMAIN"
+mkdir -p "$OUTDIR"
+cd "$OUTDIR"
 
-mkdir -p $DOMAIN
-cd $DOMAIN
+# Vérifier que les outils nécessaires sont installés (ajoute/supprime selon ton setup)
+need() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Erreur: $1 introuvable. Installe-le."; exit 2; }
+}
+for tool in subfinder assetfinder httpx dnsx jq sort crtsh; do
+  # crtsh dans la liste au cas où tu utilises un wrapper ; retire si non.
+  need "$tool"
+done
 
-echo "[*] Lancement de la reconnaissance sur $DOMAIN..."
+echo "[*] Lancement reconnaissance sur $DOMAIN - $(date --iso-8601=seconds)"
 
-### 1. Subdomains
-echo "[*] Collecte des sous-domaines..."
+# fichiers
+RAW_SUBS="subdomains_raw.txt"
+SUBS="subs.txt"
+RESOLVED="resolved.txt"
+ALIVE="alive.txt"
+HTTPX_JSON="httpx.json"
 
-echo $DOMAIN > subdomains.txt
+# 1) Collecte multi-source (en parallèle)
+> "$RAW_SUBS"
+echo "$DOMAIN" >> "$RAW_SUBS"   # si tu veux garder la racine
 
-echo "[+] subfinder -d $DOMAIN -silent"
-subfinder -d $DOMAIN -silent | tee -a subdomains.txt
+# démarrer collecteurs en arrière-plan (modifie si tu n'as pas amass etc.)
+( subfinder -d "$DOMAIN" -silent 2>/dev/null | sed 's/\.$//' >> "$RAW_SUBS" ) &
+( assetfinder --subs-only "$DOMAIN" 2>/dev/null | sed 's/\.$//' >> "$RAW_SUBS" ) &
+( crtsh "$DOMAIN" 2>/dev/null | sed 's/\.$//' >> "$RAW_SUBS" ) &
+# tu peux ajouter crt.sh calls ici si tu as un wrapper ou script pour crt.sh
+wait
 
-echo "[+] assetfinder --subs-only $DOMAIN"	
-assetfinder --subs-only $DOMAIN | tee -a subdomains.txt
+# 2) dédup + nettoyage de base
+sort -u "$RAW_SUBS" > "$SUBS"
 
-# echo "[+] amass enum -passive -d $DOMAIN"
-# amass enum -passive -d $DOMAIN | tee -a subdomains.txt
+# 3) Wildcard detection & résolution (dnsx)
+# detect wildcard by resolving a random non-existent subdomain
+RND="zzzz-$(date +%s)-$RANDOM"
+if command -v dnsx >/dev/null 2>&1; then
+  WILDCARD_IPS=$(printf "%s\n" "$RND.$DOMAIN" | dnsx -a 2>/dev/null | awk '{print $2}' | sort -u || true)
+  if [ -n "$WILDCARD_IPS" ]; then
+    echo "[!] Wildcard détecté : $WILDCARD_IPS (filtrage nécessaire)"
+    # note: n'affiche pas la suppression automatique, on filtrera les entrées qui résolvent vers même IP
+  fi
 
-cat subdomains.txt | sort -u > subs.txt
+  # Résoudre la liste et garder A records valides
+  dnsx -l "$SUBS" -a -resp -silent | awk '{print $1 " " $2}' > "$RESOLVED"
+  # Filtrer les sous-domaines qui résolvent réellement et enlever l'éventuel wildcard
+  awk '{print $1}' "$RESOLVED" | sort -u > "${SUBS}.resolved"
+  mv "${SUBS}.resolved" "$SUBS"
+else
+  echo "[!] dnsx absent - skipping DNS resolution step"
+fi
 
-### 2. Probe
-echo "[*] Vérification des sous-domaines vivants..."
+# 4) Probe HTTP (unique passe recommandée)
+# OPTION A (recommandée): une seule passe httpx qui produit JSON
+if command -v httpx >/dev/null 2>&1; then
+  # Ajuste -threads / -timeout / -retries selon besoin
+  httpx -l "$SUBS" -silent -status-code -title -tech-detect -json -o "$HTTPX_JSON" -threads 50 -timeout 6 -retries 1 >/dev/null 2>&1
+  # Extraire la liste d'hôtes vivants (hostnames uniquement)
+  jq -r '.url' "$HTTPX_JSON" | sort -u > "$ALIVE" || true
+else
+  echo "[!] httpx absent - skipping http probe"
+fi
 
-echo "[+] httpx -l subs.txt -silent > alive.txt"
-cat subs.txt | httpx -silent > alive.txt
+echo "[*] Résumé :"
+echo "  raw collected: $(wc -l < "$RAW_SUBS")"
+echo "  uniques resolved: $(wc -l < "$SUBS")"
+[ -f "$ALIVE" ] && echo "  alive (http): $(wc -l < "$ALIVE")"
 
-echo "[+] httpx -l subs.txt -silent -status-code -title -tech-detect -json > httpx.json"
-cat alive.txt | httpx -silent -status-code -title -tech-detect -json > httpx.json
-
-### 3. Screenshots
-echo "[*] Screenshots des cibles vivantes..."
-
-echo "[+] gowitness scan file -f alive.txt -s screenshots/ --no-http"
-gowitness scan file -f alive.txt -s screenshots/ --no-http
-
-### 4. Crawl + URLs
-echo "[*] Récupération des endpoints publics..."
-
-echo "[+] cat alive.txt | gau | tee urls.txt"
-cat alive.txt | gau | tee urls.txt
-
-echo "[+] cat alive.txt | waybackurls | tee -a urls.txt"
-cat alive.txt | waybackurls | tee -a urls.txt
-
-echo "[+] katana -list alive.txt -silent -o katana.txt"
-katana -list alive.txt -silent -o katana.txt
-
-cat urls.txt katana.txt | sort -u > all_urls.txt
-
-### 5. Vulnérabilités de base
-echo "[*] Scan nuclei..."
-
-echo "[+] nuclei -l alive.txt -t ~/nuclei-templates/ -o nuclei.txt"
-nuclei -l alive.txt -t ~/nuclei-templates/ -o nuclei.txt
-
-### 6. Filtres intéressants
-echo "[*] Extraction d’URLs intéressantes (paramètres potentiellement vulnérables)..."
-
-cat all_urls.txt | grep "=" | tee params.txt
-
-echo "[+] cat params.txt | gf xss > xss.txt"
-cat params.txt | gf xss > xss.txt
-
-echo "[+] cat params.txt | gf sqli > sqli.txt"
-cat params.txt | gf sqli > sqli.txt
-
-echo "[+] cat params.txt | gf ssrf > ssrf.txt"
-cat params.txt | gf ssrf > ssrf.txt
-
-echo "[+] cat params.txt | gf ssti > ssti.txt"
-cat params.txt | gf ssti > ssti.txt
-
-echo "[+] cat params.txt | gf lfi > lfi.txt"
-cat params.txt | gf lfi > lfi.txt
-
-echo "[+] cat params.txt | gf rce > rce.txt"
-cat params.txt | gf rce > rce.txt
-
-
-echo "[*] Recon terminée pour $DOMAIN !"
-
+echo "[*] Fichiers : $RAW_SUBS, $SUBS, $RESOLVED, $ALIVE, $HTTPX_JSON"
+echo "[*] Fin reconnaissance $(date --iso-8601=seconds)"
 
