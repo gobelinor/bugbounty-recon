@@ -21,7 +21,11 @@ RUN set -eux; \
     echo "Installing httpx..." && \
     go install github.com/projectdiscovery/httpx/cmd/httpx@latest && \
     echo "Installing dnsx..." && \
-    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest && \
+ 	echo "Installing nuclei..." && \
+	go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest && \
+	echo "Installing templates for nuclei..." && \
+	nuclei -update-templates
 
 # Add crtsh helper
 COPY crtsh.sh /usr/local/bin/crtsh

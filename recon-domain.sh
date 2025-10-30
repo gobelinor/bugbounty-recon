@@ -11,7 +11,7 @@ if [ "${1:-}" = "" ]; then
 fi
 
 DOMAIN="$1"
-OUTDIR="$(pwd)/$DOMAIN"
+OUTDIR="$(pwd)/RECON_$DOMAIN"
 mkdir -p "$OUTDIR"
 cd "$OUTDIR"
 
@@ -19,10 +19,14 @@ cd "$OUTDIR"
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Erreur: $1 introuvable. Installe-le."; exit 2; }
 }
-for tool in subfinder assetfinder httpx dnsx jq sort crtsh; do
+for tool in subfinder assetfinder httpx dnsx jq sort crtsh nuclei; do
   # crtsh dans la liste au cas où tu utilises un wrapper ; retire si non.
   need "$tool"
 done
+# vérifier que les templates nuclei pour takeovers sont présents
+if [ ! -d ~/nuclei-templates/http/takeovers ]; then
+  echo "Erreur: Les templates Nuclei pour takeovers sont absents."; exit 3;
+fi
 
 echo "[*] Lancement reconnaissance sur $DOMAIN - $(date --iso-8601=seconds)"
 
@@ -32,6 +36,7 @@ SUBS="subs.txt"
 RESOLVED="resolved.txt"
 ALIVE="alive.txt"
 HTTPX_JSON="httpx.json"
+TAKEOVERS="subdomain_takeovers.txt"
 
 # 1) Collecte multi-source (en parallèle)
 > "$RAW_SUBS"
@@ -70,18 +75,22 @@ fi
 # OPTION A (recommandée): une seule passe httpx qui produit JSON
 if command -v httpx >/dev/null 2>&1; then
   # Ajuste -threads / -timeout / -retries selon besoin
-  httpx -l "$SUBS" -silent -status-code -title -tech-detect -json -o "$HTTPX_JSON" -threads 50 -timeout 6 -retries 1 >/dev/null 2>&1
+  httpx -l "$SUBS" -silent -status-code -title -tech-detect -json -o "$HTTPX_JSON" -threads 50 -timeout 3 -retries 1 >/dev/null 2>&1
   # Extraire la liste d'hôtes vivants (hostnames uniquement)
   jq -r '.url' "$HTTPX_JSON" | sort -u > "$ALIVE" || true
 else
   echo "[!] httpx absent - skipping http probe"
 fi
 
+# 5) Find Subdomain Takovers
+nuclei -l "$SUBS" -t ~/nuclei-templates/http/takeovers -timeout 3 -retries 2 -c 50 -silent -o $TAKEOVERS || true
+
 echo "[*] Résumé :"
 echo "  raw collected: $(wc -l < "$RAW_SUBS")"
 echo "  uniques resolved: $(wc -l < "$SUBS")"
 [ -f "$ALIVE" ] && echo "  alive (http): $(wc -l < "$ALIVE")"
+[ -f "$TAKEOVERS" ] && echo "  potential takeovers: $(wc -l < "$TAKEOVERS")"
 
-echo "[*] Fichiers : $RAW_SUBS, $SUBS, $RESOLVED, $ALIVE, $HTTPX_JSON"
+echo "[*] Fichiers : $RAW_SUBS, $SUBS, $RESOLVED, $ALIVE, $HTTPX_JSON, takeovers.txt"
 echo "[*] Fin reconnaissance $(date --iso-8601=seconds)"
 
